@@ -69,3 +69,4 @@ py -3 python/arrow_client.py
 - [report/TITLE.md](report/TITLE.md) — титульный лист  
 - [report/REPORT.md](report/REPORT.md) — полный отчёт (9 разделов)  
 - [report/METHODOLOGY_CHECKLIST.md](report/METHODOLOGY_CHECKLIST.md) — соответствие методичке
+- [PROMPT_LOG.md](PROMPT_LOG.md) — журнал работы с AI-инструментами

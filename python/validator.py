@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import json
 import platform
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +20,17 @@ def _library_path() -> Path | None:
     else:
         path = TARGET / "libsports_validator.so"
     return path if path.exists() else None
+
+
+@lru_cache(maxsize=1)
+def _load_rust_lib() -> ctypes.CDLL | None:
+    lib_path = _library_path()
+    if lib_path is None:
+        return None
+    lib = ctypes.CDLL(str(lib_path))
+    lib.validate_match_json.argtypes = [ctypes.c_char_p]
+    lib.validate_match_json.restype = ctypes.c_int
+    return lib
 
 
 def validator_backend() -> str:
@@ -38,13 +50,9 @@ def validate_python(record: dict) -> bool:
 
 
 def validate_rust(record: dict) -> bool:
-    lib_path = _library_path()
-    if lib_path is None:
+    lib = _load_rust_lib()
+    if lib is None:
         return validate_python(record)
-
-    lib = ctypes.CDLL(str(lib_path))
-    lib.validate_match_json.argtypes = [ctypes.c_char_p]
-    lib.validate_match_json.restype = ctypes.c_int
     payload = json.dumps(record, ensure_ascii=False).encode("utf-8")
     return bool(lib.validate_match_json(payload))
 

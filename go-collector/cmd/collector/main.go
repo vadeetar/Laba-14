@@ -491,7 +491,7 @@ func (c *Collector) runWindowWriter(ctx context.Context) {
 			if agg.MatchCount == 0 {
 				continue
 			}
-	if err := c.saveWindowAggregate(agg); err != nil {
+			if err := c.saveWindowAggregate(agg); err != nil {
 				log.Printf("save window failed: %v", err)
 			}
 			if err := c.exportWindowsArrow(agg); err != nil {
