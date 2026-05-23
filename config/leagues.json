@@ -1,0 +1,8 @@
+{
+  "leagues": [
+    {"id": "4328", "name": "English Premier League", "sport": "football"},
+    {"id": "4335", "name": "Spanish La Liga", "sport": "football"},
+    {"id": "4331", "name": "German Bundesliga", "sport": "football"},
+    {"id": "4380", "name": "NHL", "sport": "hockey"}
+  ]
+}

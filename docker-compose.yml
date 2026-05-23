@@ -1,0 +1,61 @@
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.17
+    command:
+      - /usr/local/bin/etcd
+      - --advertise-client-urls=http://0.0.0.0:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+    ports:
+      - "2379:2379"
+
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  collector-worker-1:
+    build:
+      context: .
+      dockerfile: go-collector/Dockerfile
+    environment:
+      WORKER_ID: worker-1
+      OUTPUT_DIR: /data
+      CONFIG_PATH: /app/config/leagues.json
+      NATS_URL: nats://nats:4222
+      ETCD_ENDPOINTS: etcd:2379
+      COLLECT_INTERVAL: 30s
+      BATCH_SIZE: 15
+      BATCH_FLUSH: 5s
+      WINDOW_SIZE: 60s
+      ARROW_PORT: 8815
+    volumes:
+      - ./data:/data
+      - ./config/leagues.json:/app/config/leagues.json:ro
+    depends_on:
+      - etcd
+      - nats
+    ports:
+      - "8815:8815"
+
+  collector-worker-2:
+    build:
+      context: .
+      dockerfile: go-collector/Dockerfile
+    environment:
+      WORKER_ID: worker-2
+      OUTPUT_DIR: /data
+      CONFIG_PATH: /app/config/leagues.json
+      NATS_URL: nats://nats:4222
+      ETCD_ENDPOINTS: etcd:2379
+      COLLECT_INTERVAL: 30s
+      BATCH_SIZE: 15
+      BATCH_FLUSH: 5s
+      WINDOW_SIZE: 60s
+      ARROW_PORT: 8816
+    volumes:
+      - ./data:/data
+      - ./config/leagues.json:/app/config/leagues.json:ro
+    depends_on:
+      - etcd
+      - nats
