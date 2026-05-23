@@ -4,6 +4,7 @@ __pycache__/
 venv/
 go-collector/collector.exe
 go-collector/collector
+data/*.jsonl
 data/*.arrow
 output/*.parquet
 rust-validator/target/
