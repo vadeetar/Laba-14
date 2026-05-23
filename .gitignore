@@ -2,10 +2,16 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-data/*.jsonl
-output/
-charts/
-*.parquet
-go-collector/go.sum
+go-collector/collector.exe
+go-collector/collector
+data/*.arrow
+output/*.parquet
 rust-validator/target/
 .idea/
+
+# report artifacts are tracked
+!charts/
+!charts/**
+!report/screenshots/
+!report/screenshots/**
+!output/*.json

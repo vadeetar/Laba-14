@@ -1,0 +1,29 @@
+{
+  "python": {
+    "collector": "python_asyncio",
+    "events_collected": 8,
+    "elapsed_seconds": 0.2935,
+    "peak_memory_mb": 1.86,
+    "events_per_second": 27.25
+  },
+  "go": {
+    "collector": "go_goroutines",
+    "events_collected": 8,
+    "elapsed_seconds": 0.3170994,
+    "peak_memory_mb": 3.1441574096679688,
+    "events_per_second": 25.22868223654791,
+    "worker_id": "worker-1"
+  },
+  "analysis_pipeline": {
+    "duckdb_seconds": 0.029219600000033097,
+    "polars_seconds": 0.0020120000003771565
+  },
+  "arrow_transfer": {
+    "source": "arrow_ipc",
+    "matches_rows": 8,
+    "json_size_bytes": 10530,
+    "arrow_size_bytes": 2240,
+    "parquet_size_bytes": 4251,
+    "compression_ratio_vs_json": 0.213
+  }
+}

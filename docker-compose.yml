@@ -14,6 +14,21 @@ services:
       - "4222:4222"
       - "8222:8222"
 
+  collector-benchmark:
+    build:
+      context: .
+      dockerfile: go-collector/Dockerfile
+    environment:
+      BENCHMARK_MODE: "1"
+      WORKER_ID: worker-benchmark
+      OUTPUT_DIR: /data
+      CONFIG_PATH: /app/config/leagues.json
+      NATS_URL: ""
+      ETCD_ENDPOINTS: ""
+    volumes:
+      - ./data:/data
+      - ./config/leagues.json:/app/config/leagues.json:ro
+
   collector-worker-1:
     build:
       context: .

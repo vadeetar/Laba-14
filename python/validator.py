@@ -1,13 +1,28 @@
-"""Python-обёртка над Rust-валидатором (fallback на Python при отсутствии DLL)."""
+"""Python-обёртка над Rust-валидатором (ctypes) с fallback."""
 
 from __future__ import annotations
 
 import ctypes
 import json
+import platform
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LIB_PATH = ROOT / "rust-validator" / "target" / "release" / "sports_validator.dll"
+TARGET = ROOT / "rust-validator" / "target" / "release"
+
+
+def _library_path() -> Path | None:
+    if platform.system() == "Windows":
+        path = TARGET / "sports_validator.dll"
+    elif platform.system() == "Darwin":
+        path = TARGET / "libsports_validator.dylib"
+    else:
+        path = TARGET / "libsports_validator.so"
+    return path if path.exists() else None
+
+
+def validator_backend() -> str:
+    return "rust" if _library_path() else "python"
 
 
 def validate_python(record: dict) -> bool:
@@ -23,10 +38,11 @@ def validate_python(record: dict) -> bool:
 
 
 def validate_rust(record: dict) -> bool:
-    if not LIB_PATH.exists():
+    lib_path = _library_path()
+    if lib_path is None:
         return validate_python(record)
 
-    lib = ctypes.CDLL(str(LIB_PATH))
+    lib = ctypes.CDLL(str(lib_path))
     lib.validate_match_json.argtypes = [ctypes.c_char_p]
     lib.validate_match_json.restype = ctypes.c_int
     payload = json.dumps(record, ensure_ascii=False).encode("utf-8")
@@ -41,14 +57,3 @@ def validate_batch(records: list[dict]) -> tuple[list[dict], list[dict]]:
         else:
             invalid.append(record)
     return valid, invalid
-
-
-if __name__ == "__main__":
-    sample = {
-        "home_team": "Team A",
-        "away_team": "Team B",
-        "home_score": 2,
-        "away_score": 1,
-        "total_goals": 3,
-    }
-    print("valid" if validate_rust(sample) else "invalid")

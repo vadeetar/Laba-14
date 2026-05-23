@@ -1,0 +1,12 @@
+{
+  "matches": 8,
+  "avg_goals": 2.0,
+  "leagues": {
+    "English Premier League": 2,
+    "Spanish La Liga": 2,
+    "German Bundesliga": 2,
+    "NHL": 2
+  },
+  "window_minutes": 5.0,
+  "updated_at": "2026-05-23T18:05:41.298946+00:00"
+}

@@ -1,0 +1,8 @@
+{
+  "collector": "go_goroutines",
+  "events_collected": 8,
+  "elapsed_seconds": 0.3170994,
+  "peak_memory_mb": 3.1441574096679688,
+  "events_per_second": 25.22868223654791,
+  "worker_id": "worker-1"
+}

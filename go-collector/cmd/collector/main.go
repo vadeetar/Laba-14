@@ -72,7 +72,6 @@ type Collector struct {
 	batchSize    int
 	batchFlush   time.Duration
 	windowSize   time.Duration
-	arrowPort    int
 
 	httpClient *http.Client
 	eventsCh   chan MatchEvent
@@ -83,27 +82,28 @@ type Collector struct {
 
 	mu       sync.Mutex
 	buffer   []MatchEvent
+	recent   []MatchEvent
 	lastSave time.Time
 	windows  map[string][]MatchEvent
 }
 
-func env(key, fallback string) string {
+func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
 }
 
-func envDuration(key, fallback string) time.Duration {
-	d, err := time.ParseDuration(env(key, fallback))
+func getEnvDuration(key, fallback string) time.Duration {
+	d, err := time.ParseDuration(getEnv(key, fallback))
 	if err != nil {
 		d, _ = time.ParseDuration(fallback)
 	}
 	return d
 }
 
-func envInt(key, fallback int) int {
-	v := env(key, "")
+func getEnvInt(name string, fallback int) int {
+	v := getEnv(name, "")
 	if v == "" {
 		return fallback
 	}
@@ -139,58 +139,65 @@ func parseScore(raw string) int {
 }
 
 func (c *Collector) fetchLeagueEvents(ctx context.Context, league League) ([]MatchEvent, error) {
-	url := fmt.Sprintf("https://www.thesportsdb.com/api/v1/json/3/eventspastleague.php?id=%s", league.ID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var payload struct {
-		Events []map[string]any `json:"events"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, err
-	}
-	if payload.Events == nil {
-		return []MatchEvent{}, nil
+	endpoints := []string{
+		fmt.Sprintf("https://www.thesportsdb.com/api/v1/json/3/eventspastleague.php?id=%s", league.ID),
+		fmt.Sprintf("https://www.thesportsdb.com/api/v1/json/3/eventsnextleague.php?id=%s", league.ID),
 	}
 
 	now := time.Now().UTC()
-	events := make([]MatchEvent, 0, len(payload.Events))
-	for _, item := range payload.Events {
-		homeScore := parseScore(fmt.Sprint(item["intHomeScore"]))
-		awayScore := parseScore(fmt.Sprint(item["intAwayScore"]))
-		event := MatchEvent{
-			EventID:    fmt.Sprint(item["idEvent"]),
-			LeagueID:   league.ID,
-			LeagueName: league.Name,
-			Sport:      league.Sport,
-			HomeTeam:   fmt.Sprint(item["strHomeTeam"]),
-			AwayTeam:   fmt.Sprint(item["strAwayTeam"]),
-			HomeScore:  homeScore,
-			AwayScore:  awayScore,
-			TotalGoals: homeScore + awayScore,
-			EventDate:  fmt.Sprint(item["dateEvent"]),
-			Status:     fmt.Sprint(item["strStatus"]),
-			Collected:  now,
-			WorkerID:   c.workerID,
-			Source:     "thesportsdb",
+	events := make([]MatchEvent, 0)
+
+	for _, url := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
 		}
-		if event.EventID == "" || event.HomeTeam == "" || event.AwayTeam == "" {
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		var payload struct {
+			Events []map[string]any `json:"events"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return nil, err
+		}
+		if payload.Events == nil {
 			continue
 		}
-		events = append(events, event)
+
+		for _, item := range payload.Events {
+			homeScore := parseScore(fmt.Sprint(item["intHomeScore"]))
+			awayScore := parseScore(fmt.Sprint(item["intAwayScore"]))
+			event := MatchEvent{
+				EventID:    fmt.Sprint(item["idEvent"]),
+				LeagueID:   league.ID,
+				LeagueName: league.Name,
+				Sport:      league.Sport,
+				HomeTeam:   fmt.Sprint(item["strHomeTeam"]),
+				AwayTeam:   fmt.Sprint(item["strAwayTeam"]),
+				HomeScore:  homeScore,
+				AwayScore:  awayScore,
+				TotalGoals: homeScore + awayScore,
+				EventDate:  fmt.Sprint(item["dateEvent"]),
+				Status:     fmt.Sprint(item["strStatus"]),
+				Collected:  now,
+				WorkerID:   c.workerID,
+				Source:     "thesportsdb",
+			}
+			if event.EventID == "" || event.HomeTeam == "" || event.AwayTeam == "" {
+				continue
+			}
+			events = append(events, event)
+		}
 	}
 	return events, nil
 }
@@ -315,6 +322,23 @@ func (c *Collector) flushBuffer(force bool) {
 	c.batchCh <- batch
 }
 
+func (c *Collector) storeRecent(batch []MatchEvent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recent = append(c.recent, batch...)
+	if len(c.recent) > 1000 {
+		c.recent = c.recent[len(c.recent)-1000:]
+	}
+}
+
+func (c *Collector) snapshotRecent() []MatchEvent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]MatchEvent, len(c.recent))
+	copy(out, c.recent)
+	return out
+}
+
 func (c *Collector) writeBatch(batch []MatchEvent) error {
 	if len(batch) == 0 {
 		return nil
@@ -352,6 +376,12 @@ func (c *Collector) writeBatch(batch []MatchEvent) error {
 				log.Printf("nats publish failed: %v", err)
 			}
 		}
+	}
+
+	c.storeRecent(batch)
+
+	if err := c.exportMatchesArrow(batch); err != nil {
+		log.Printf("arrow export failed: %v", err)
 	}
 
 	c.mu.Lock()
@@ -456,8 +486,11 @@ func (c *Collector) runWindowWriter(ctx context.Context) {
 			if agg.MatchCount == 0 {
 				continue
 			}
-			if err := c.saveWindowAggregate(agg); err != nil {
+	if err := c.saveWindowAggregate(agg); err != nil {
 				log.Printf("save window failed: %v", err)
+			}
+			if err := c.exportWindowsArrow(agg); err != nil {
+				log.Printf("arrow window export failed: %v", err)
 			}
 		}
 	}
@@ -549,7 +582,7 @@ func (c *Collector) close() {
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
-	cfgPath := env("CONFIG_PATH", "config/leagues.json")
+	cfgPath := getEnv("CONFIG_PATH", "config/leagues.json")
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
@@ -557,15 +590,14 @@ func main() {
 
 	collector := &Collector{
 		cfg:          cfg,
-		workerID:     env("WORKER_ID", "worker-1"),
-		outputDir:    env("OUTPUT_DIR", "data"),
-		natsURL:      env("NATS_URL", ""),
-		etcdEndpoint: env("ETCD_ENDPOINTS", ""),
-		interval:     envDuration("COLLECT_INTERVAL", "30s"),
-		batchSize:    envInt("BATCH_SIZE", 15),
-		batchFlush:   envDuration("BATCH_FLUSH", "5s"),
-		windowSize:   envDuration("WINDOW_SIZE", "60s"),
-		arrowPort:    envInt("ARROW_PORT", 8815),
+		workerID:     getEnv("WORKER_ID", "worker-1"),
+		outputDir:    getEnv("OUTPUT_DIR", "data"),
+		natsURL:      getEnv("NATS_URL", ""),
+		etcdEndpoint: getEnv("ETCD_ENDPOINTS", ""),
+		interval:     getEnvDuration("COLLECT_INTERVAL", "30s"),
+		batchSize:    getEnvInt("BATCH_SIZE", 15),
+		batchFlush:   getEnvDuration("BATCH_FLUSH", "5s"),
+		windowSize:   getEnvDuration("WINDOW_SIZE", "60s"),
 		httpClient:   &http.Client{Timeout: 20 * time.Second},
 		eventsCh:     make(chan MatchEvent, 256),
 		batchCh:      make(chan []MatchEvent, 32),
@@ -585,11 +617,15 @@ func main() {
 	}
 	defer collector.close()
 
+	if getEnv("BENCHMARK_MODE", "") == "1" {
+		runBenchmarkMode(collector)
+		return
+	}
+
 	go collector.runBatcher(ctx)
 	go collector.runWriter(ctx)
 	go collector.runWindowAggregator(ctx)
 	go collector.runWindowWriter(ctx)
-	go startArrowFlightServer(ctx, collector)
 
 	go collector.runCollectorLoop(ctx)
 

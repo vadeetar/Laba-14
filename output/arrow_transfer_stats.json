@@ -1,0 +1,8 @@
+{
+  "source": "arrow_ipc",
+  "matches_rows": 8,
+  "json_size_bytes": 10530,
+  "arrow_size_bytes": 2240,
+  "parquet_size_bytes": 4251,
+  "compression_ratio_vs_json": 0.213
+}

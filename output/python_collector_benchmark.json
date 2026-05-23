@@ -1,0 +1,7 @@
+{
+  "collector": "python_asyncio",
+  "events_collected": 8,
+  "elapsed_seconds": 0.2935,
+  "peak_memory_mb": 1.86,
+  "events_per_second": 27.25
+}

@@ -1,36 +1,82 @@
-"""Python-клиент Apache Arrow Flight для получения оконных агрегатов от Go-сборщика."""
+"""Python-клиент Apache Arrow IPC — основной канал передачи данных."""
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
-import pyarrow.flight as flight
+import polars as pl
+import pyarrow as pa
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT / "data"
 OUTPUT_DIR = ROOT / "output"
 
 
-def fetch_arrow_windows(host: str = "127.0.0.1", port: int = 8815) -> Path:
-    client = flight.connect(f"grpc://{host}:{port}")
-    info = client.get_flight_info(flight.FlightDescriptor.for_path("sports_windows"))
-    reader = client.do_get(info.endpoints[0].ticket)
-    table = reader.read_all()
+def read_arrow_ipc(path: Path) -> pl.DataFrame:
+    with path.open("rb") as handle:
+        reader = pa.ipc.open_stream(handle)
+        table = reader.read_all()
+    return pl.from_arrow(table)
 
+
+def jsonl_fallback() -> pl.DataFrame:
+    rows: list[dict] = []
+    for file in sorted(DATA_DIR.glob("matches_*.jsonl")):
+        with file.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    rows.append(json.loads(line))
+    if not rows:
+        raise FileNotFoundError("Нет Arrow IPC и JSONL")
+    return pl.DataFrame(rows)
+
+
+def save_arrow_pipeline() -> dict[str, Path]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    parquet_path = OUTPUT_DIR / "arrow_windows.parquet"
-    table.to_pandas().to_parquet(parquet_path, index=False)
+    result: dict[str, Path] = {}
 
-    json_path = OUTPUT_DIR / "arrow_windows.json"
-    json_path.write_text(
-        json.dumps(table.to_pydict(), indent=2, default=str),
-        encoding="utf-8",
+    arrow_matches = DATA_DIR / "matches.arrow"
+    if arrow_matches.exists():
+        matches = read_arrow_ipc(arrow_matches)
+        source = "arrow_ipc"
+    else:
+        print("Arrow IPC не найден, fallback JSONL -> Parquet")
+        matches = jsonl_fallback()
+        source = "jsonl_fallback"
+
+    matches_path = OUTPUT_DIR / "arrow_matches.parquet"
+    matches.write_parquet(matches_path)
+    result["matches"] = matches_path
+
+    arrow_windows = DATA_DIR / "windows.arrow"
+    if arrow_windows.exists():
+        windows = read_arrow_ipc(arrow_windows)
+        windows_path = OUTPUT_DIR / "arrow_windows.parquet"
+        windows.write_parquet(windows_path)
+        result["windows"] = windows_path
+
+    json_size = sum(f.stat().st_size for f in DATA_DIR.glob("matches_*.jsonl"))
+    arrow_size = arrow_matches.stat().st_size if arrow_matches.exists() else 0
+    meta = {
+        "source": source,
+        "matches_rows": matches.height,
+        "json_size_bytes": json_size,
+        "arrow_size_bytes": arrow_size,
+        "parquet_size_bytes": matches_path.stat().st_size,
+        "compression_ratio_vs_json": round(arrow_size / json_size, 3) if json_size else None,
+    }
+    (OUTPUT_DIR / "arrow_transfer_stats.json").write_text(
+        json.dumps(meta, indent=2), encoding="utf-8"
     )
 
-    print(f"Получено {table.num_rows} оконных агрегатов через Arrow Flight")
-    print(f"Сохранено: {parquet_path}")
-    return parquet_path
+    print(f"Источник: {source}, матчей: {matches.height}, parquet: {matches_path}")
+    return result
 
 
 if __name__ == "__main__":
-    fetch_arrow_windows()
+    save_arrow_pipeline()

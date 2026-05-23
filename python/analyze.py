@@ -14,25 +14,33 @@ import polars as pl
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from validator import validate_batch, validator_backend  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 OUTPUT_DIR = ROOT / "output"
 CHARTS_DIR = ROOT / "charts"
 
 
-def load_jsonl(pattern: str) -> pl.DataFrame:
-    files = sorted(DATA_DIR.glob(pattern))
+def load_primary_data() -> tuple[pl.DataFrame, str]:
+    arrow_path = OUTPUT_DIR / "arrow_matches.parquet"
+    if arrow_path.exists():
+        print(f"=== Загрузка через Apache Arrow: {arrow_path} ===")
+        return pl.read_parquet(arrow_path), "arrow"
+
+    files = sorted(DATA_DIR.glob("matches_*.jsonl"))
     if not files:
-        raise FileNotFoundError(f"Не найдены файлы {pattern} в {DATA_DIR}")
+        raise FileNotFoundError("Нет arrow_matches.parquet и JSONL в data/")
 
     rows: list[dict] = []
     for file in files:
         with file.open("r", encoding="utf-8") as handle:
             for line in handle:
-                line = line.strip()
-                if line:
+                if line.strip():
                     rows.append(json.loads(line))
-    return pl.DataFrame(rows)
+    print("=== Fallback: загрузка JSONL ===")
+    return pl.DataFrame(rows), "jsonl"
 
 
 def inspect(df: pl.DataFrame) -> None:
@@ -43,6 +51,16 @@ def inspect(df: pl.DataFrame) -> None:
     print(f"\nКоличество строк: {df.height}")
     nulls = {col: df[col].null_count() for col in df.columns}
     print(f"Пропуски по колонкам: {nulls}")
+
+
+def validate_with_rust(df: pl.DataFrame) -> pl.DataFrame:
+    print(f"\n=== Валидация записей ({validator_backend()}) ===")
+    records = df.to_dicts()
+    valid, invalid = validate_batch(records)
+    print(f"Валидных: {len(valid)}, отклонено: {len(invalid)}")
+    if invalid:
+        print("Примеры отклонённых:", invalid[:3])
+    return pl.DataFrame(valid) if valid else df
 
 
 def clean(df: pl.DataFrame) -> pl.DataFrame:
@@ -130,24 +148,17 @@ def duckdb_analysis(parquet_path: Path) -> pl.DataFrame:
     print(f"\nВремя DuckDB: {duck_time:.4f} c")
     print(f"Время Polars: {polars_time:.4f} c")
 
-    metrics = {
-        "duckdb_seconds": duck_time,
-        "polars_seconds": polars_time,
-    }
-    (OUTPUT_DIR / "performance.json").write_text(
-        json.dumps(metrics, indent=2), encoding="utf-8"
-    )
+    metrics = {"duckdb_seconds": duck_time, "polars_seconds": polars_time}
+    (OUTPUT_DIR / "performance.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     return result
 
 
 def visualize(df: pl.DataFrame, summary: pl.DataFrame) -> None:
     CHARTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Среднее количество голов по лигам
+    # 1. Bar chart - avg goals by league
     fig, ax = plt.subplots(figsize=(10, 5))
-    labels = summary["league_name"].to_list()
-    values = summary["avg_goals"].to_list()
-    ax.barh(labels, values, color="#2563eb")
+    ax.barh(summary["league_name"].to_list(), summary["avg_goals"].to_list(), color="#2563eb")
     ax.set_title("Среднее количество голов по лигам")
     ax.set_xlabel("Средние голы")
     fig.tight_layout()
@@ -155,10 +166,11 @@ def visualize(df: pl.DataFrame, summary: pl.DataFrame) -> None:
     fig.savefig(chart1, dpi=150)
     plt.close(fig)
 
-    # 2. Распределение total_goals
+    # 2. Histogram
     fig, ax = plt.subplots(figsize=(8, 5))
     goals = df["total_goals"].to_list()
-    ax.hist(goals, bins=range(0, max(goals) + 2), color="#16a34a", edgecolor="white")
+    max_goals = max(goals) if goals else 1
+    ax.hist(goals, bins=range(0, max_goals + 2), color="#16a34a", edgecolor="white")
     ax.set_title("Распределение общего числа голов в матче")
     ax.set_xlabel("Голы")
     ax.set_ylabel("Количество матчей")
@@ -167,13 +179,51 @@ def visualize(df: pl.DataFrame, summary: pl.DataFrame) -> None:
     fig.savefig(chart2, dpi=150)
     plt.close(fig)
 
-    print(f"\nГрафики сохранены:\n- {chart1}\n- {chart2}")
+    # 3. Time series - goals by event date
+    ts = (
+        df.filter(pl.col("event_date") != "unknown")
+        .group_by("event_date")
+        .agg(pl.col("total_goals").mean().alias("avg_goals"))
+        .sort("event_date")
+    )
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(ts["event_date"].to_list(), ts["avg_goals"].to_list(), marker="o", color="#9333ea")
+    ax.set_title("Временной ряд: средние голы по датам матчей")
+    ax.set_xlabel("Дата")
+    ax.set_ylabel("Средние голы")
+    plt.xticks(rotation=45, ha="right")
+    fig.tight_layout()
+    chart3 = CHARTS_DIR / "goals_time_series.png"
+    fig.savefig(chart3, dpi=150)
+    plt.close(fig)
+
+    # 4. Pie chart - matches by sport
+    sport_counts = df.group_by("sport").len()
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.pie(
+        sport_counts["len"].to_list(),
+        labels=sport_counts["sport"].to_list(),
+        autopct="%1.1f%%",
+        colors=["#2563eb", "#dc2626"],
+    )
+    ax.set_title("Доля матчей по видам спорта")
+    fig.tight_layout()
+    chart4 = CHARTS_DIR / "sport_share_pie.png"
+    fig.savefig(chart4, dpi=150)
+    plt.close(fig)
+
+    print(
+        "\nГрафики сохранены:\n"
+        f"- {chart1}\n- {chart2}\n- {chart3}\n- {chart4}"
+    )
 
 
 def main() -> None:
-    raw = load_jsonl("matches_*.jsonl")
+    raw, source = load_primary_data()
+    print(f"Канал данных: {source}")
     inspect(raw)
-    cleaned = clean(raw)
+    validated = validate_with_rust(raw)
+    cleaned = clean(validated)
     summary = aggregate(cleaned)
     parquet_path = OUTPUT_DIR / "matches_clean.parquet"
     save_parquet(cleaned, parquet_path)
