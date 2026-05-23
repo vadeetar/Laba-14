@@ -48,6 +48,7 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
 py -3 python/collector_python.py
 py -3 python/analyze.py
 py -3 python/benchmark.py
+py -3 python/export_dashboard_preview.py
 
 New-Item -ItemType Directory -Force -Path report/screenshots | Out-Null
 Copy-Item charts/*.png report/screenshots/ -ErrorAction SilentlyContinue

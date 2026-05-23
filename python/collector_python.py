@@ -54,21 +54,23 @@ async def fetch_league(session: aiohttp.ClientSession, league: dict) -> list[dic
     return events
 
 
-async def collect_all() -> tuple[int, float, float, list[dict]]:
+async def collect_all() -> tuple[int, float, float, float, list[dict]]:
     leagues = json.loads(CONFIG.read_text(encoding="utf-8"))["leagues"]
     tracemalloc.start()
-    started = time.perf_counter()
+    wall_start = time.perf_counter()
+    cpu_start = time.process_time()
 
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_league(session, league) for league in leagues]
         batches = await asyncio.gather(*tasks)
 
-    elapsed = time.perf_counter() - started
+    elapsed = time.perf_counter() - wall_start
+    cpu_elapsed = time.process_time() - cpu_start
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
     records = [event for batch in batches for event in batch if event.get("event_id")]
-    return len(records), elapsed, peak / (1024 * 1024), records
+    return len(records), elapsed, cpu_elapsed, peak / (1024 * 1024), records
 
 
 def save_jsonl(records: list[dict]) -> Path:
@@ -81,7 +83,7 @@ def save_jsonl(records: list[dict]) -> Path:
 
 
 def main() -> None:
-    total, elapsed, peak_mb, records = asyncio.run(collect_all())
+    total, elapsed, cpu_elapsed, peak_mb, records = asyncio.run(collect_all())
     if records:
         saved = save_jsonl(records)
         print(f"JSONL сохранён: {saved}")
@@ -89,6 +91,7 @@ def main() -> None:
         "collector": "python_asyncio",
         "events_collected": total,
         "elapsed_seconds": round(elapsed, 4),
+        "cpu_seconds": round(cpu_elapsed, 4),
         "peak_memory_mb": round(peak_mb, 2),
         "events_per_second": round(total / elapsed, 2) if elapsed else 0,
     }

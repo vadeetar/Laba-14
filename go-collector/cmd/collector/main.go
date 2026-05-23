@@ -244,6 +244,11 @@ func (c *Collector) assignedLeagues(ctx context.Context) []League {
 	if len(sharded) == 0 {
 		return c.cfg.Leagues[:1]
 	}
+	names := make([]string, len(sharded))
+	for i, l := range sharded {
+		names[i] = l.Name
+	}
+	log.Printf("etcd sharding: worker=%s total_workers=%d assigned=%v", c.workerID, len(workers), names)
 	return sharded
 }
 

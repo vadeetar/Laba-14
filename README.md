@@ -15,30 +15,39 @@ py -3 -m streamlit run python/dashboard.py
 ## Архитектура
 
 ```text
-Go collector → JSONL / NATS / Arrow Flight → Polars → Parquet → DuckDB → Charts → Streamlit
+Go workers + etcd → JSONL / NATS / Arrow IPC → Polars → Parquet → DuckDB → Charts → Streamlit
 ```
+
+## etcd (распределённый сбор)
+
+Сервис **etcd** описан в `docker-compose.yml` (порт 2379). Два worker шардируют лиги через ключи `/lab14/workers/`.
+
+Подробнее: [docs/ETCD.md](docs/ETCD.md)
 
 ## Структура
 
 | Компонент | Путь |
 |-----------|------|
 | Go-сборщик | `go-collector/` |
+| etcd docs | `docs/ETCD.md` |
 | Python-анализ | `python/analyze.py` |
-| Arrow-клиент | `python/arrow_client.py` |
+| Arrow IPC клиент | `python/arrow_client.py` |
 | NATS consumer | `python/nats_consumer.py` |
 | Benchmark | `python/benchmark.py` |
 | Dashboard | `python/dashboard.py` |
 | Rust-валидатор | `rust-validator/` |
 | Docker | `docker-compose.yml` |
 | Kubernetes HPA | `k8s/deployment.yaml` |
+| Чеклист методички | `report/METHODOLOGY_CHECKLIST.md` |
 | Отчёт | `report/REPORT.md` |
 
 ## Docker
 
 ```powershell
-docker compose run --rm collector-benchmark   # Go benchmark
-docker compose up -d                          # полный стек
-py -3 python/arrow_client.py                  # Arrow Flight
+docker compose up -d etcd nats collector-worker-1 collector-worker-2
+docker compose logs collector-worker-1 | findstr etcd
+docker compose run --rm collector-benchmark
+py -3 python/arrow_client.py
 ```
 
 ## Kubernetes
@@ -49,5 +58,6 @@ py -3 python/arrow_client.py                  # Arrow Flight
 
 ## Отчёт
 
-- [report/TITLE.md](report/TITLE.md) — титульный лист
-- [report/REPORT.md](report/REPORT.md) — полный отчёт
+- [report/TITLE.md](report/TITLE.md) — титульный лист  
+- [report/REPORT.md](report/REPORT.md) — полный отчёт (9 разделов)  
+- [report/METHODOLOGY_CHECKLIST.md](report/METHODOLOGY_CHECKLIST.md) — соответствие методичке

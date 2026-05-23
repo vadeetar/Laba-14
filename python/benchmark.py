@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 from pathlib import Path
 
@@ -24,10 +23,13 @@ def load_json(path: Path) -> dict:
 
 
 def load_go_stats() -> dict:
-    for path in (OUTPUT / "go_collector_benchmark.json", ROOT / "data" / "go_collector_benchmark.json"):
+    for path in (ROOT / "data" / "go_collector_benchmark.json", OUTPUT / "go_collector_benchmark.json"):
         if path.exists():
             stats = load_json(path)
-            shutil.copy2(path, OUTPUT / "go_collector_benchmark.json")
+            if path != OUTPUT / "go_collector_benchmark.json":
+                (OUTPUT / "go_collector_benchmark.json").write_text(
+                    json.dumps(stats, indent=2), encoding="utf-8"
+                )
             return stats
     return {}
 
@@ -57,15 +59,18 @@ def main() -> None:
         labels = ["Python asyncio", "Go goroutines"]
         elapsed = [python_stats.get("elapsed_seconds", 0), go_stats.get("elapsed_seconds", 0)]
         memory = [python_stats.get("peak_memory_mb", 0), go_stats.get("peak_memory_mb", 0)]
+        cpu = [python_stats.get("cpu_seconds", 0), go_stats.get("cpu_seconds", 0)]
         throughput = [python_stats.get("events_per_second", 0), go_stats.get("events_per_second", 0)]
 
-        fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-        axes[0].bar(labels, elapsed, color=["#f97316", "#2563eb"])
-        axes[0].set_title("Время сбора (с)")
-        axes[1].bar(labels, memory, color=["#f97316", "#2563eb"])
-        axes[1].set_title("Память (MB)")
-        axes[2].bar(labels, throughput, color=["#f97316", "#2563eb"])
-        axes[2].set_title("Событий/с")
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        axes[0, 0].bar(labels, elapsed, color=["#f97316", "#2563eb"])
+        axes[0, 0].set_title("Время сбора (с)")
+        axes[0, 1].bar(labels, memory, color=["#f97316", "#2563eb"])
+        axes[0, 1].set_title("Память (MB)")
+        axes[1, 0].bar(labels, cpu, color=["#f97316", "#2563eb"])
+        axes[1, 0].set_title("CPU time (с)")
+        axes[1, 1].bar(labels, throughput, color=["#f97316", "#2563eb"])
+        axes[1, 1].set_title("Событий/с")
         fig.tight_layout()
         fig.savefig(CHARTS / "go_vs_python_benchmark.png", dpi=150)
         plt.close(fig)

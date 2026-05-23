@@ -14,6 +14,7 @@ type benchmarkResult struct {
 	Collector       string  `json:"collector"`
 	EventsCollected int     `json:"events_collected"`
 	ElapsedSeconds  float64 `json:"elapsed_seconds"`
+	CPUSeconds      float64 `json:"cpu_seconds"`
 	PeakMemoryMB    float64 `json:"peak_memory_mb"`
 	EventsPerSecond float64 `json:"events_per_second"`
 	WorkerID        string  `json:"worker_id"`
@@ -45,9 +46,11 @@ func (c *Collector) collectAllEvents(ctx context.Context) []MatchEvent {
 
 func runBenchmarkMode(collector *Collector) {
 	ctx := context.Background()
+	cpuStart := cpuTimeSeconds()
 	started := time.Now()
 	events := collector.collectAllEvents(ctx)
 	elapsed := time.Since(started).Seconds()
+	cpuUsed := cpuTimeSeconds() - cpuStart
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -57,6 +60,7 @@ func runBenchmarkMode(collector *Collector) {
 		Collector:       "go_goroutines",
 		EventsCollected: len(events),
 		ElapsedSeconds:  elapsed,
+		CPUSeconds:      cpuUsed,
 		PeakMemoryMB:    peakMB,
 		WorkerID:        collector.workerID,
 	}
